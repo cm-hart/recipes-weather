@@ -277,7 +277,12 @@ body {
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--space-4);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.form-row .form-group {
+  margin: 0;
 }
 
 .form-label {
@@ -311,6 +316,7 @@ body {
   transition: all var(--transition-normal);
   background: white;
   min-height: 48px; /* Minimum touch target size */
+  width: 100%;
 }
 
 .form-input:focus,
@@ -671,6 +677,11 @@ body {
   overflow: hidden;
 }
 
+.recipe-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-2xl);
+}
+
 .recipe-card:focus {
   outline: 2px solid var(--primary-500);
   outline-offset: 2px;
@@ -699,11 +710,6 @@ body {
 
 .recipe-card.confidence-medium::before {
   background: linear-gradient(90deg, var(--accent-500), var(--accent-400));
-}
-
-.recipe-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-2xl);
 }
 
 .recipe-header {
@@ -1156,6 +1162,7 @@ body {
   
   .form-row {
     grid-template-columns: 1fr;
+    gap: var(--space-4);
   }
   
   .weather-details {

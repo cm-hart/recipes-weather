@@ -17,8 +17,8 @@ export function analyzeWeatherAndRecommendRecipes(weatherData, userPreferences =
     // Step 1: Analyze weather conditions
     const weatherAnalysis = analyzeWeatherConditions(weatherData);
     
-    // Step 2: Filter recipes based on weather
-    const weatherMatchedRecipes = filterRecipesByWeather(weatherAnalysis);
+    // Step 2: Filter recipes based on weather (more flexible approach)
+    const weatherMatchedRecipes = filterRecipesByWeatherFlexible(weatherAnalysis);
     
     // Step 3: Apply user preferences
     const personalizedRecipes = applyUserPreferences(weatherMatchedRecipes, userPreferences);
@@ -30,6 +30,7 @@ export function analyzeWeatherAndRecommendRecipes(weatherData, userPreferences =
     const recommendations = generateRecommendationReasons(rankedRecipes, weatherAnalysis);
     
     console.log('✅ Recipe analysis complete');
+    console.log('Final recommendations:', recommendations);
     
     return {
       weatherAnalysis,
@@ -170,26 +171,102 @@ function assessComfortFoodNeed(weatherData, condition) {
 }
 
 /**
- * Filters recipes based on weather analysis
+ * Filters recipes based on weather analysis with more flexible matching
  * @param {Object} weatherAnalysis - Weather analysis results
  * @returns {Array} Filtered recipes
  */
-function filterRecipesByWeather(weatherAnalysis) {
+function filterRecipesByWeatherFlexible(weatherAnalysis) {
   const { temperature, condition, moodCategories } = weatherAnalysis;
   
-  return recipeDatabase.filter(recipe => {
-    // Check if recipe matches weather conditions
-    const matchesCondition = recipe.weatherTypes.includes(condition);
+  console.log('🔍 Filtering recipes with flexible matching...');
+  console.log('Temperature category:', temperature.category);
+  console.log('Weather condition:', condition);
+  console.log('Mood categories:', moodCategories);
+  
+  // Score each recipe based on multiple criteria
+  const scoredRecipes = recipeDatabase.map(recipe => {
+    let score = 0;
+    let matchReasons = [];
     
-    // Check if recipe matches temperature category
-    const matchesTemperature = recipe.temperature === temperature.category;
+    // Direct weather condition match (highest priority)
+    if (recipe.weatherTypes.includes(condition)) {
+      score += 10;
+      matchReasons.push(`Perfect match for ${condition} weather`);
+    }
     
-    // Check if recipe category matches mood
-    const matchesMood = moodCategories.includes(recipe.category);
+    // Temperature category match
+    if (recipe.temperature === temperature.category) {
+      score += 8;
+      matchReasons.push(`Ideal for ${temperature.category} temperatures`);
+    }
     
-    // Recipe passes if it matches any of the criteria
-    return matchesCondition || matchesTemperature || matchesMood;
+    // Mood category match
+    if (moodCategories.includes(recipe.category)) {
+      score += 6;
+      matchReasons.push(`Matches ${recipe.category} mood`);
+    }
+    
+    // Flexible temperature matching (adjacent categories)
+    const tempOrder = ['cold', 'cool', 'warm', 'hot'];
+    const currentTempIndex = tempOrder.indexOf(temperature.category);
+    const recipeTempIndex = tempOrder.indexOf(recipe.temperature);
+    
+    if (Math.abs(currentTempIndex - recipeTempIndex) === 1) {
+      score += 4;
+      matchReasons.push(`Good temperature match (${recipe.temperature} works with ${temperature.category})`);
+    }
+    
+    // Seasonal appropriateness
+    const season = weatherAnalysis.season;
+    if (seasonalPreferences[season]) {
+      const seasonalMatch = seasonalPreferences[season].some(pref => 
+        recipe.category.includes(pref) || 
+        recipe.description.toLowerCase().includes(pref) ||
+        recipe.nutritionHighlights.some(highlight => highlight.toLowerCase().includes(pref))
+      );
+      if (seasonalMatch) {
+        score += 3;
+        matchReasons.push(`Perfect for ${season} season`);
+      }
+    }
+    
+    // Weather-adjacent conditions (similar weather types)
+    const weatherGroups = {
+      sunny: ['clear', 'sunny', 'partly-cloudy'],
+      rainy: ['rainy', 'drizzle', 'overcast'],
+      cold: ['snow', 'fog', 'cold'],
+      mild: ['partly-cloudy', 'cloudy']
+    };
+    
+    for (const [group, conditions] of Object.entries(weatherGroups)) {
+      if (conditions.includes(condition)) {
+        const adjacentMatch = recipe.weatherTypes.some(weatherType => 
+          conditions.includes(weatherType) && weatherType !== condition
+        );
+        if (adjacentMatch) {
+          score += 2;
+          matchReasons.push(`Good match for similar weather conditions`);
+        }
+      }
+    }
+    
+    // Base score for all recipes (ensures everyone gets some score)
+    score += 1;
+    
+    return {
+      ...recipe,
+      matchScore: score,
+      matchReasons: matchReasons
+    };
   });
+  
+  // Return recipes with any score > 0 (which should be all of them now)
+  const filteredRecipes = scoredRecipes.filter(recipe => recipe.matchScore > 0);
+  
+  console.log(`📊 Recipe scoring complete: ${filteredRecipes.length} recipes matched`);
+  console.log('Top scored recipes:', filteredRecipes.slice(0, 3).map(r => ({ name: r.name, score: r.matchScore })));
+  
+  return filteredRecipes;
 }
 
 /**
@@ -203,11 +280,14 @@ function applyUserPreferences(recipes, userPreferences) {
     return recipes;
   }
   
+  console.log('👤 Applying user preferences...');
+  
   return recipes.filter(recipe => {
     // Filter by cooking time preference
     if (userPreferences.maxCookingTime) {
       const maxTime = parseInt(userPreferences.maxCookingTime);
       if (recipe.cookingTime > maxTime) {
+        console.log(`⏰ Filtered out ${recipe.name} - too long (${recipe.cookingTime}min > ${maxTime}min)`);
         return false;
       }
     }
@@ -215,6 +295,7 @@ function applyUserPreferences(recipes, userPreferences) {
     // Filter by difficulty preference
     if (userPreferences.difficulty) {
       if (recipe.difficulty !== userPreferences.difficulty) {
+        console.log(`👨‍🍳 Filtered out ${recipe.name} - wrong difficulty (${recipe.difficulty} != ${userPreferences.difficulty})`);
         return false;
       }
     }
@@ -237,27 +318,16 @@ function applyUserPreferences(recipes, userPreferences) {
  * @returns {Array} Ranked recipes
  */
 function rankRecipesByRelevance(recipes, weatherAnalysis, userPreferences) {
+  console.log('🏆 Ranking recipes by relevance...');
+  
+  if (recipes.length === 0) {
+    console.log('⚠️ No recipes to rank, returning empty array');
+    return [];
+  }
+  
   const scoredRecipes = recipes.map(recipe => {
-    let score = 0;
-    let scoreReasons = [];
-    
-    // Score based on weather condition match
-    if (recipe.weatherTypes.includes(weatherAnalysis.condition)) {
-      score += 10;
-      scoreReasons.push(`Perfect match for ${weatherAnalysis.condition} weather`);
-    }
-    
-    // Score based on temperature match
-    if (recipe.temperature === weatherAnalysis.temperature.category) {
-      score += 8;
-      scoreReasons.push(`Ideal for ${weatherAnalysis.temperature.category} temperatures`);
-    }
-    
-    // Score based on mood category match
-    if (weatherAnalysis.moodCategories.includes(recipe.category)) {
-      score += 6;
-      scoreReasons.push(`Matches your weather mood for ${recipe.category} food`);
-    }
+    let score = recipe.matchScore || 0; // Start with existing match score
+    let scoreReasons = [...(recipe.matchReasons || [])];
     
     // Score based on comfort food need
     if (weatherAnalysis.comfortFoodNeed.level === 'high' && recipe.category === 'comfort') {
@@ -274,17 +344,23 @@ function rankRecipesByRelevance(recipes, weatherAnalysis, userPreferences) {
       scoreReasons.push('Simple preparation suits current weather mood');
     }
     
-    // Score based on seasonal appropriateness
-    const season = weatherAnalysis.season;
-    if (seasonalPreferences[season]) {
-      const seasonalMatch = seasonalPreferences[season].some(pref => 
-        recipe.category.includes(pref) || 
-        recipe.description.toLowerCase().includes(pref)
-      );
-      if (seasonalMatch) {
-        score += 3;
-        scoreReasons.push(`Perfect for ${season} season`);
-      }
+    // Bonus for quick recipes in any weather
+    if (recipe.cookingTime <= 20) {
+      score += 2;
+      scoreReasons.push('Quick and convenient preparation');
+    }
+    
+    // Bonus for nutritional highlights that match weather
+    if (weatherAnalysis.temperature.category === 'hot' && 
+        recipe.nutritionHighlights.some(h => h.toLowerCase().includes('cooling') || h.toLowerCase().includes('hydrating'))) {
+      score += 3;
+      scoreReasons.push('Cooling properties perfect for hot weather');
+    }
+    
+    if (weatherAnalysis.temperature.category === 'cold' && 
+        recipe.nutritionHighlights.some(h => h.toLowerCase().includes('warming') || h.toLowerCase().includes('protein'))) {
+      score += 3;
+      scoreReasons.push('Warming and nourishing for cold weather');
     }
     
     return {
@@ -295,9 +371,17 @@ function rankRecipesByRelevance(recipes, weatherAnalysis, userPreferences) {
   });
   
   // Sort by score (highest first) and return top recommendations
-  return scoredRecipes
+  const rankedRecipes = scoredRecipes
     .sort((a, b) => b.relevanceScore - a.relevanceScore)
     .slice(0, 3); // Return top 3 recommendations
+  
+  console.log('🎯 Final rankings:', rankedRecipes.map(r => ({ 
+    name: r.name, 
+    score: r.relevanceScore,
+    reasons: r.scoreReasons.length
+  })));
+  
+  return rankedRecipes;
 }
 
 /**
@@ -307,6 +391,11 @@ function rankRecipesByRelevance(recipes, weatherAnalysis, userPreferences) {
  * @returns {Array} Recommendations with detailed reasoning
  */
 function generateRecommendationReasons(rankedRecipes, weatherAnalysis) {
+  if (rankedRecipes.length === 0) {
+    console.log('⚠️ No ranked recipes to generate reasons for');
+    return [];
+  }
+  
   return rankedRecipes.map((recipe, index) => {
     const reasoning = generateDetailedReasoning(recipe, weatherAnalysis, index + 1);
     
@@ -332,7 +421,12 @@ function generateRecommendationReasons(rankedRecipes, weatherAnalysis) {
 function generateDetailedReasoning(recipe, weatherAnalysis, rank) {
   const reasons = [];
   
-  // Weather-specific reasoning
+  // Use the score reasons we collected during ranking
+  if (recipe.scoreReasons && recipe.scoreReasons.length > 0) {
+    reasons.push(...recipe.scoreReasons.slice(0, 3)); // Take top 3 reasons
+  }
+  
+  // Add weather-specific reasoning
   if (weatherAnalysis.temperature.category === 'cold') {
     if (recipe.category === 'comfort' || recipe.category === 'warming') {
       reasons.push(`This ${recipe.category} dish will warm you up on this ${weatherAnalysis.temperature.category} day`);
@@ -343,27 +437,26 @@ function generateDetailedReasoning(recipe, weatherAnalysis, rank) {
     }
   }
   
-  // Condition-specific reasoning
-  if (['rainy', 'drizzle', 'overcast'].includes(weatherAnalysis.condition)) {
-    reasons.push(`Perfect comfort food for this ${weatherAnalysis.condition} weather`);
-  } else if (['sunny', 'clear'].includes(weatherAnalysis.condition)) {
-    reasons.push(`A delightful choice for this beautiful ${weatherAnalysis.condition} day`);
-  }
-  
-  // Cooking time reasoning
+  // Add cooking time reasoning
   if (recipe.cookingTime <= 20) {
     reasons.push('Quick and easy to prepare');
   } else if (recipe.cookingTime >= 60) {
     reasons.push('Worth the time investment for a satisfying meal');
   }
   
-  // Seasonal reasoning
+  // Add seasonal reasoning
   const season = weatherAnalysis.season;
   reasons.push(`Seasonally appropriate for ${season}`);
   
+  // Ensure we have at least some reasoning
+  if (reasons.length === 0) {
+    reasons.push(`A delicious ${recipe.category} option that works well with current conditions`);
+    reasons.push(`${recipe.description}`);
+  }
+  
   // Combine reasons into a coherent explanation
   let reasoning = `Ranked #${rank} because: `;
-  reasoning += reasons.join(', ') + '.';
+  reasoning += reasons.slice(0, 3).join(', ') + '.';
   
   // Add score-based confidence
   if (recipe.relevanceScore >= 15) {
@@ -406,7 +499,8 @@ function generateFallbackRecommendations(weatherData) {
       reasoning: `A versatile choice that works well in various weather conditions. ${recipe.description}`,
       weatherContext: weatherData.description || 'Current weather conditions',
       confidenceLevel: 'medium'
-    }
+    },
+    relevanceScore: 10 - index // Give them decent scores
   }));
   
   return {
